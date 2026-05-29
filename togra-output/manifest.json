@@ -1,0 +1,16 @@
+{
+  "version": "0.1.0",
+  "created_at": "2026-05-29T15:28:48.059863+00:00",
+  "project_root": "/Users/alexasadullin/PycharmProjects/token_graph_for_claudecode",
+  "last_build": "2026-05-29T15:29:06.876496+00:00",
+  "stats": {
+    "files_total": 48,
+    "dirty": 48,
+    "clean": 0,
+    "removed": 0,
+    "by_lang": {
+      "python": 48
+    },
+    "mode": "update"
+  }
+}

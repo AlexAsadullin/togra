@@ -1,0 +1,251 @@
+# 📊 Новая команда: `togra tokens` — подсчёт токенов
+---
+
+## 🆕 Команда: `togra tokens`
+
+### Назначение
+Подсчёт приблизительного количества токенов в исходных файлах проекта или в сгенерированном графе. Помогает оценить:
+- Сколько будет стоить загрузка проекта в контекст ИИ
+- Насколько эффективен граф для экономии токенов
+- Какие части проекта «тяжёлые» и требуют оптимизации
+
+### Синтаксис
+```bash
+togra tokens [OPTIONS] [PATH]
+```
+
+### Параметры и флаги
+
+| Флаг | Алиас | Описание | Пример |
+|------|-------|----------|--------|
+| **`[PATH]`** | — | Путь к файлу или папке для подсчёта. По умолчанию — корень проекта. | `togra tokens src/auth` |
+| `--graph` | `-g` | Подсчитать токены **в `graph.json`**, а не в исходных файлах. | `togra tokens --graph` |
+| `--include-comments` | `-c` | Включать комментарии в подсчёт (по умолчанию исключаются). | `togra tokens -c` |
+| `--include-strings` | `-s` | Включать строковые литералы в подсчёт (по умолчанию исключаются). | `togra tokens -s` |
+| `--format` | `-f` | Формат вывода: `plain`, `json`, `table`. По умолчанию: `table`. | `togra tokens -f json` |
+| `--lang` | `-l` | Фильтр по языку. Пример: `--lang python,typescript`. | `togra tokens -l python` |
+| `--verbose` | `-v` | Детальный отчёт: токены по файлам, топ-10 самых «тяжёлых». | `togra tokens -v` |
+| `--help` | `-h` | Показать справку. | `togra tokens --help` |
+
+---
+
+## 📐 Алгоритм подсчёта токенов
+
+### Для исходных файлов (без `--graph`):
+```python
+def count_tokens_in_file(file_path: Path, lang: str, options: TokenOptions) -> int:
+    """
+    Подсчёт токенов в файле.
+    
+    Алгоритм (упрощённый):
+    1. Чтение файла
+    2. Парсинг через tree-sitter (для точного исключения комментариев/строк)
+    3. Если options.exclude_comments: удалить узлы типа 'comment'
+    4. Если options.exclude_strings: удалить узлы типа 'string_literal'
+    5. Токенизация оставшегося текста:
+       - Базовый метод: разбивка по [\w]+ и символам
+       - Продвинутый: использовать BPE-токенизатор (например, cl100k_base для Claude)
+    6. Возврат количества токенов
+    """
+```
+
+**Методы токенизации (по возрастанию точности):**
+
+| Метод | Скорость | Точность | Когда использовать |
+|-------|----------|----------|-------------------|
+| **Whitespace + punctuation** | ⚡ Очень быстро | ~60-70% | Быстрая оценка, `--verbose` не нужен |
+| **Regex `\w+|[^\w\s]`** | ⚡ Быстро | ~75-85% | По умолчанию |
+| **Tiktoken (cl100k_base)** | 🐌 Медленно | ~95-99% | Точная оценка перед запуском ИИ |
+| **Tree-sitter + tiktoken** | 🐌🐌 Очень медленно | ~99% | Только для отчётов, не для CLI по умолчанию |
+
+> 💡 **Рекомендация по умолчанию:** использовать `regex`-метод + поправочный коэффициент `×1.15` для приближения к cl100k_base. Это даёт баланс скорости и точности.
+
+### Для графа (`--graph`):
+```python
+def count_tokens_in_graph(graph_path: Path, options: TokenOptions) -> dict:
+    """
+    Подсчёт токенов в graph.json.
+    
+    Считаются:
+    - Ключи JSON (например, "imports", "classes", "parameters")
+    - Значения строковых полей (кроме "description": "")
+    - Числовые значения (как 1 токен каждое)
+    
+    Не считаются:
+    - Поле "description" (всегда пустое в togra)
+    - Служебные хеши ("hash": "sha256:...") — опционально, флаг --include-hashes
+    """
+```
+
+**Пример структуры и подсчёта:**
+```json
+{
+  "src/auth/login.py": {
+    "_meta": { "lang": "python" },  // 4 токена: "src/auth/login.py", "_meta", "lang", "python"
+    "description": "",              // 0 токенов: пустое значение игнорируется
+    "imports": {                    // 2 токена: "imports", "{"
+      "external": [                 // 2 токена
+        { "lib": "fastapi" }        // 4 токена: "{", "lib", "fastapi", "}"
+      ]
+    }
+  }
+}
+// Итого: ~12 токенов для этого фрагмента
+```
+
+---
+
+## 🖥️ Примеры вывода
+
+### Базовый вывод (по умолчанию, `--format table`):
+```bash
+$ togra tokens
+
+📊 Token Estimate for: /home/user/my-project
+
+┌─────────────────────────┬─────────┬─────────┐
+│ Path                    │ Files   │ Tokens  │
+├─────────────────────────┼─────────┼─────────┤
+│ src/                    │ 189     │ 124,500 │
+│ tests/                  │ 42      │ 18,200  │
+│ docs/                   │ 16      │ 8,400   │
+├─────────────────────────┼─────────┼─────────┤
+│ TOTAL                   │ 247     │ 151,100 │
+└─────────────────────────┴─────────┴─────────┘
+
+💡 Estimated cost (Claude): ~$0.75 per full context load
+💡 Graph size: 2.1 MB (~8,400 tokens) — 94% smaller than source
+```
+
+### Только граф (`--graph`):
+```bash
+$ togra tokens --graph
+
+📊 Token Estimate for: togra-output/graph.json
+
+┌─────────────────────────┬─────────┐
+│ Component               │ Tokens  │
+├─────────────────────────┼─────────┤
+│ Keys & structure        │ 3,200   │
+│ String values           │ 4,800   │
+│ Numbers & metadata      │ 400     │
+├─────────────────────────┼─────────┤
+│ TOTAL                   │ 8,400   │
+└─────────────────────────┴─────────┘
+
+✅ Graph is 94.4% smaller than source code (151,100 → 8,400 tokens)
+```
+
+### Конкретная папка + JSON-вывод:
+```bash
+$ togra tokens src/auth --format json
+
+{
+  "path": "src/auth",
+  "files": 12,
+  "tokens": 8420,
+  "breakdown": {
+    "python": 7800,
+    "typescript": 620
+  },
+  "top_files": [
+    {"file": "src/auth/login.py", "tokens": 2100},
+    {"file": "src/auth/middleware.ts", "tokens": 1850},
+    {"file": "src/auth/utils.py", "tokens": 1200}
+  ]
+}
+```
+
+### С деталями (`--verbose`):
+```bash
+$ togra tokens --verbose
+
+🔍 Scanning...
+   Found 247 files (python: 189, typescript: 42, json: 16)
+
+⚡ Counting tokens (regex method, ×1.15 coefficient)...
+
+📊 Top 10 heaviest files:
+   1. src/core/engine.py          • 4,200 tokens
+   2. src/api/handlers.ts         • 3,800 tokens
+   3. src/auth/login.py           • 2,100 tokens
+   ...
+
+💡 Recommendations:
+   • Consider splitting src/core/engine.py (4,200 tokens)
+   • Graph representation would reduce this to ~400 tokens (90% savings)
+```
+
+---
+
+## 🔧 Интеграция в CLI (`cli.py`)
+
+```python
+@app.command()
+def tokens(
+    path: Path = Argument(default=".", help="Path to file or directory"),
+    graph: bool = Option(False, "--graph", "-g", help="Count tokens in graph.json instead of source"),
+    include_comments: bool = Option(False, "--include-comments", "-c", help="Include comments in count"),
+    include_strings: bool = Option(False, "--include-strings", "-s", help="Include string literals in count"),
+    format: str = Option("table", "--format", "-f", help="Output format: plain, json, table"),
+    lang: str = Option(None, "--lang", "-l", help="Filter by language: python,typescript"),
+    verbose: bool = Option(False, "--verbose", "-v", help="Detailed output"),
+):
+    """
+    Estimate token count for project files or generated graph.
+    
+    Use this to plan AI context usage and evaluate graph efficiency.
+    """
+    if graph:
+        result = count_tokens_in_graph(
+            graph_path=Path("togra-output/graph.json"),
+            include_comments=include_comments,
+            include_strings=include_strings,
+        )
+    else:
+        result = count_tokens_in_directory(
+            root=Path("."),
+            target=path,
+            include_comments=include_comments,
+            include_strings=include_strings,
+            lang_filter=lang.split(",") if lang else None,
+        )
+    
+    output = format_result(result, format=format, verbose=verbose)
+    print(output)
+```
+
+---
+
+## 📋 Обновление чеклиста реализации (добавить в раздел 10)
+
+- [ ] Реализовать команду `togra tokens` с флагами `--graph`, `--format`, `--lang`
+- [ ] Алгоритм токенизации: regex-метод + коэффициент ×1.15 (по умолчанию)
+- [ ] Опциональная интеграция с `tiktoken` для точного подсчёта (флаг `--exact`)
+- [ ] Исключение поля `description` из подсчёта в графе
+- [ ] Форматирование вывода: `table` (rich), `json`, `plain`
+- [ ] Тесты: подсчёт на фикстурах, проверка `--graph`, проверка фильтрации по языку
+
+---
+
+## 💡 Почему это важно
+
+| Сценарий | Без `togra tokens` | С `togra tokens` |
+|----------|-------------------|------------------|
+| **Оценка стоимости** | Гадание: «наверное, много» | Точная цифра: «151,100 токенов = ~$0.75» |
+| **Решение: использовать граф?** | Интуитивно | На основе данных: «граф = 8,400 токенов → экономия 94%» |
+| **Оптимизация проекта** | Неясно, что «тяжёлое» | Топ-10 файлов по токенам → целенаправленный рефакторинг |
+| **Планирование контекста** | Риск превысить лимит | Точный расчёт: «могу загрузить 3 модуля, но не весь проект» |
+
+---
+
+## 🎯 Итог
+
+**Команда:** `togra tokens [PATH] [OPTIONS]`  
+**Ключевые флаги:** `--graph`, `--format`, `--lang`, `--verbose`  
+**Алгоритм:** regex-токенизация + коэффициент ×1.15 (быстро и достаточно точно)  
+**Вывод:** таблица, JSON или простой текст — на выбор пользователя  
+
+Эта команда делает `togra` не только инструментом построения графа, но и **калькулятором экономии**, помогая принимать обоснованные решения о работе с ИИ-контекстом.
+
+Нужно добавить примеры использования в `README` или прототип кода для функции токенизации?
