@@ -121,19 +121,26 @@ class IgnoreMatcher:
 
         ``rel_path`` must be POSIX-style and relative to the project root
         (use :meth:`pathlib.PurePosixPath.as_posix`).
+
+        Semantics mirror ``.gitignore``: a non-negated pattern that matches
+        either ``rel_path`` itself **or any of its ancestor directories**
+        causes ``rel_path`` to be ignored.  Directory-only patterns
+        (``foo/``) match only directories — i.e. they ignore by matching
+        an ancestor, never by matching a file path directly.
         """
         path = str(PurePosixPath(rel_path))
         ignored = False
         for rule in self._rules:
-            if rule.dir_only and not is_dir:
-                # Directory-only rules don't match files directly, but they
-                # do match files *inside* an ignored directory — handled by
-                # iterating ancestors below.
-                if not self._any_ancestor_match(rule, path):
-                    continue
-            if rule.regex.match(path):
-                ignored = not rule.negate
-            elif rule.dir_only and self._any_ancestor_match(rule, path):
+            direct = bool(rule.regex.match(path))
+            ancestor = self._any_ancestor_match(rule, path)
+            if rule.dir_only:
+                # Direct match counts only when the queried path is itself a
+                # directory.  For files we rely on ancestor matching to
+                # propagate the ignore downwards.
+                hit = ancestor or (direct and is_dir)
+            else:
+                hit = direct or ancestor
+            if hit:
                 ignored = not rule.negate
         return ignored
 

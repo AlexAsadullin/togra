@@ -85,6 +85,29 @@ def test_parses_imports_classes_functions(tmp_path: Path):
     assert fn.returns.type == "User"
 
 
+def test_method_named_description_does_not_break_invariant(tmp_path: Path):
+    """A class with a method literally called ``description`` must not
+    confuse the safety check — the value at ``methods.description`` is a
+    FunctionNode, not the file's description string.
+    """
+    src = (
+        b"class Box:\n"
+        b"    @property\n"
+        b"    def description(self):\n"
+        b"        return 'hi'\n"
+    )
+    node = PythonParser().parse(
+        content=src, rel_path="box.py", project_root=tmp_path, file_hash="h",
+    )
+    fragment = node.to_fragment()
+    from togra.schema import assert_descriptions_empty
+
+    # Must not raise.
+    assert_descriptions_empty(fragment)
+    # Sanity: the method itself is present with its own empty description.
+    assert fragment["classes"]["Box"]["methods"]["description"]["description"] == ""
+
+
 def test_descriptions_remain_empty(tmp_path: Path):
     _scaffold(tmp_path)
     parser = PythonParser()

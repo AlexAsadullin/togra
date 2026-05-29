@@ -35,3 +35,20 @@ def test_double_star():
     m = IgnoreMatcher.from_text("**/dist/**\n")
     assert m.matches("dist/x.js")
     assert m.matches("pkg/dist/sub/y.js")
+
+
+def test_path_pattern_without_trailing_slash_ignores_contents():
+    """`backend/uv_venv` (no trailing /) must ignore files inside it,
+    matching git's behaviour.
+    """
+    m = IgnoreMatcher.from_text("backend/uv_venv\n")
+    assert m.matches("backend/uv_venv")
+    assert m.matches("backend/uv_venv/lib/python3.13/site-packages/aiohttp/x.py")
+    assert not m.matches("backend/other.py")
+
+
+def test_anchored_subdir_pattern_without_slash():
+    m = IgnoreMatcher.from_text("frontend/dist\n")
+    assert m.matches("frontend/dist/index.html")
+    assert m.matches("frontend/dist/assets/app.js")
+    assert not m.matches("frontend/src/main.ts")

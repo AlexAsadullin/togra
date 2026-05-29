@@ -145,7 +145,12 @@ def assert_descriptions_empty(node: Any, path: str = "") -> None:
     """
     if isinstance(node, dict):
         for key, value in node.items():
-            if key == "description":
+            # ``description`` is a schema field only when its value is a
+            # string.  When the dict is a ``methods``/``functions``/``classes``
+            # map, the key ``"description"`` is just the entity's name and
+            # the value is its (nested) node — recurse into it instead of
+            # comparing to "".
+            if key == "description" and isinstance(value, str):
                 if value != "":
                     raise AssertionError(
                         f"Non-empty description at {path or '<root>'}: {value!r}"

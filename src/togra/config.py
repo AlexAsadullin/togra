@@ -49,9 +49,17 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Virtualenvs (cover common conventions: pip, uv, poetry, hatch, etc.)
 .venv/
 venv/
 env/
+uv_venv/
+.uv_venv/
+
+# Installed Python packages — never index third-party code.
+**/site-packages/
+**/dist-packages/
 
 *.log
 *.tmp
