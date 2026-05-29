@@ -52,9 +52,14 @@ def cmd_init(
     project: Path = typer.Option(
         Path("."), "--project", "-p", help="Project root (default: cwd)."
     ),
+    claude: bool = typer.Option(
+        False, "--claude",
+        help="Also create .claude/togra.md with usage instructions for "
+        "Claude Code (and other agents that read .claude/).",
+    ),
 ) -> None:
     """Bootstrap togra-output/ and .tograignore in the project."""
-    run_init(_project_root(project), console=console)
+    run_init(_project_root(project), console=console, claude=claude)
 
 
 @app.command("build")

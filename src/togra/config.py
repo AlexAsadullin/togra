@@ -11,6 +11,9 @@ CACHE_INDEX_FILENAME = "index.json"
 FRAGMENTS_DIRNAME = "fragments"
 IGNORE_FILENAME = ".tograignore"
 AGENT_GUIDE_FILENAME = "AGENT_GUIDE.md"
+CLAUDE_DIR_NAME = ".claude"
+CLAUDE_INSTRUCTIONS_FILENAME = "togra.md"
+CLAUDE_INSTRUCTIONS_TEMPLATE = "claude_togra.md"
 
 # Extension → canonical language id.
 # Languages "python" and "vue" use full AST parsing; "javascript"/"typescript"

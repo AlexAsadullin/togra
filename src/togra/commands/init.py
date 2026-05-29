@@ -12,6 +12,9 @@ from togra import __version__
 from togra.cache.store import ensure_cache_layout
 from togra.config import (
     AGENT_GUIDE_FILENAME,
+    CLAUDE_DIR_NAME,
+    CLAUDE_INSTRUCTIONS_FILENAME,
+    CLAUDE_INSTRUCTIONS_TEMPLATE,
     DEFAULT_TOGRAIGNORE,
     IGNORE_FILENAME,
     MANIFEST_FILENAME,
@@ -20,16 +23,21 @@ from togra.config import (
 from togra.fs.atomic import atomic_write_json
 
 
+def _read_template(name: str) -> str:
+    """Return text of a bundled template under ``togra.templates``."""
+    return resources.files("togra.templates").joinpath(name).read_text(encoding="utf-8")
+
+
 def _read_bundled_agent_guide() -> str:
-    """Return the ``AGENT_GUIDE.md`` text shipped inside the package."""
-    return (
-        resources.files("togra.templates")
-        .joinpath(AGENT_GUIDE_FILENAME)
-        .read_text(encoding="utf-8")
-    )
+    return _read_template(AGENT_GUIDE_FILENAME)
 
 
-def run_init(project_root: Path, *, console: Console | None = None) -> Path:
+def run_init(
+    project_root: Path,
+    *,
+    console: Console | None = None,
+    claude: bool = False,
+) -> Path:
     """Create the output directory layout and ``.tograignore``.
 
     Returns the path to ``togra-output/`` for downstream commands.
@@ -59,13 +67,17 @@ def run_init(project_root: Path, *, console: Console | None = None) -> Path:
     else:
         console.print(f"[dim]{IGNORE_FILENAME} already exists, leaving as-is[/dim]")
 
-    # AGENT_GUIDE.md
-    guide_path = project_root / AGENT_GUIDE_FILENAME
+    # AGENT_GUIDE.md — lives inside togra-output/ so it ships with the
+    # graph for the downstream AI agent and stays out of the project root.
+    guide_path = output_dir / AGENT_GUIDE_FILENAME
     if not guide_path.exists():
         guide_path.write_text(_read_bundled_agent_guide(), encoding="utf-8")
-        console.print(f"[green]created[/green] {AGENT_GUIDE_FILENAME}")
+        console.print(f"[green]created[/green] {guide_path.relative_to(project_root)}")
     else:
-        console.print(f"[dim]{AGENT_GUIDE_FILENAME} already exists, leaving as-is[/dim]")
+        console.print(
+            f"[dim]{guide_path.relative_to(project_root)} already exists, "
+            "leaving as-is[/dim]"
+        )
 
     # manifest.json
     manifest_path = output_dir / MANIFEST_FILENAME
@@ -80,6 +92,20 @@ def run_init(project_root: Path, *, console: Console | None = None) -> Path:
                 "stats": {},
             },
         )
+
+    # Optional Claude Code instructions.
+    if claude:
+        claude_dir = project_root / CLAUDE_DIR_NAME
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        instructions_path = claude_dir / CLAUDE_INSTRUCTIONS_FILENAME
+        rel = instructions_path.relative_to(project_root)
+        if not instructions_path.exists():
+            instructions_path.write_text(
+                _read_template(CLAUDE_INSTRUCTIONS_TEMPLATE), encoding="utf-8"
+            )
+            console.print(f"[green]created[/green] {rel}")
+        else:
+            console.print(f"[dim]{rel} already exists, leaving as-is[/dim]")
 
     # Friendly nudge about .git presence — not an error.
     if not (project_root / ".git").exists():

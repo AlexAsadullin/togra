@@ -120,15 +120,40 @@ def test_init_copies_gitignore(tmp_path: Path):
 
 def test_init_writes_agent_guide(tmp_path: Path):
     _invoke(["init", "--project", str(tmp_path)])
-    guide = tmp_path / "AGENT_GUIDE.md"
+    guide = tmp_path / "togra-output" / "AGENT_GUIDE.md"
     assert guide.exists()
-    text = guide.read_text(encoding="utf-8")
-    # Sanity: must contain the canonical heading shipped in the template.
-    assert "Guide for the description-filling agent" in text
+    assert "Guide for the description-filling agent" in guide.read_text(encoding="utf-8")
+    # And it must NOT pollute the project root.
+    assert not (tmp_path / "AGENT_GUIDE.md").exists()
+
+
+def test_init_without_claude_flag_does_not_touch_claude_dir(tmp_path: Path):
+    _invoke(["init", "--project", str(tmp_path)])
+    assert not (tmp_path / ".claude").exists()
+
+
+def test_init_with_claude_flag_writes_instructions(tmp_path: Path):
+    _invoke(["init", "--project", str(tmp_path), "--claude"])
+    instructions = tmp_path / ".claude" / "togra.md"
+    assert instructions.exists()
+    text = instructions.read_text(encoding="utf-8")
+    # Cross-reference to AGENT_GUIDE.md must be present.
+    assert "AGENT_GUIDE.md" in text
+    # Must mention reading graph.json first.
+    assert "graph.json" in text
+
+
+def test_init_with_claude_does_not_overwrite_existing(tmp_path: Path):
+    (tmp_path / ".claude").mkdir()
+    target = tmp_path / ".claude" / "togra.md"
+    target.write_text("custom\n", encoding="utf-8")
+    _invoke(["init", "--project", str(tmp_path), "--claude"])
+    assert target.read_text(encoding="utf-8") == "custom\n"
 
 
 def test_init_does_not_overwrite_agent_guide(tmp_path: Path):
-    guide = tmp_path / "AGENT_GUIDE.md"
+    (tmp_path / "togra-output").mkdir()
+    guide = tmp_path / "togra-output" / "AGENT_GUIDE.md"
     guide.write_text("my custom guide\n", encoding="utf-8")
     _invoke(["init", "--project", str(tmp_path)])
     assert guide.read_text(encoding="utf-8") == "my custom guide\n"
