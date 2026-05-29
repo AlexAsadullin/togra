@@ -1,159 +1,239 @@
-# togra (Token-Graph)
+# togra — Token-Graph
 
-Offline CLI utility that builds an algorithmic graph of a project's structure
-**without calling any LLM**. All `description` fields in the resulting
-`togra-output/graph.json` are left empty (`""`) so they can be filled later by
-an external AI agent — a separate, controlled step.
+**Карта проекта для ИИ-агентов. Без LLM-вызовов. Без сетевых запросов.
+0 токенов на построение.**
 
-- 0 tokens spent at build time
-- 0 network calls (everything is parsed locally with `tree-sitter`)
-- SHA256-based incremental cache → second build only re-parses changed files
+`togra` локально парсит ваш код через `tree-sitter`, строит структурный
+граф (`togra-output/graph.json`) — какие файлы есть, какие в них классы,
+функции, методы, импорты, вызовы — и оставляет поля `description` пустыми
+(`""`). Заполняет их потом ИИ-агент по подготовленной инструкции
+([`AGENT_GUIDE.md`](src/togra/templates/AGENT_GUIDE.md)), уже работая со
+структурой, а не с тысячами строк сырого кода.
 
-See [`.claude/tech-task.md`](.claude/tech-task.md) for the full specification.
+Зачем это нужно:
 
-## Install
+- ИИ-агент тратит токены только на смысл (описания), а не на парсинг кода.
+- Ничего не уходит в сеть: только локальный AST + SHA256-кэш.
+- Повторный билд пересобирает только изменённые файлы.
+- Граф можно коммитить — команда получает общую карту проекта.
 
-The package is not on PyPI yet. Install from the local source tree:
-
-```bash
-# Editable install (recommended for development — code edits are live)
-pip install -e /path/to/togra
-
-# Or a one-shot install of the current state
-pip install /path/to/togra
-
-# Or globally via pipx (isolated venv, `togra` available anywhere)
-pipx install /path/to/togra
-```
-
-Sanity check:
-
-```bash
-togra --help
-togra --version
-```
-
-## Commands
-
-| Command | What it does |
-|---------|--------------|
-| `togra init` | Create `togra-output/` (cache + manifest) and `.tograignore` (copy of `.gitignore` if present, otherwise a sensible default). |
-| `togra build` | Build / update `togra-output/graph.json`. |
-| `togra info` | Print cache and last-build statistics. |
-| `togra clean` | Drop cached fragments (`--all` removes the whole `togra-output/`). |
-| `togra tokens [PATH]` | Approximate Claude-style token count for files, a directory, or the graph. |
-
-### `togra build` flags
-
-| Flag | Alias | Default | Description |
-|------|-------|---------|-------------|
-| `--update` | `-u` | ✓ | Incremental: only files whose SHA256 changed. |
-| `--full` | `-f` |   | Ignore cache; rebuild everything. |
-| `--newonly` | `-n` |   | Only files absent from the index; modified files keep their cached fragment. |
-| `--lang` | `-l` |   | Comma-separated language filter, e.g. `python,typescript`. |
-| `--output` | `-o` | `togra-output/graph.json` | Custom graph path. |
-| `--output-dir` | `-d` | `togra-output/` | Custom artefacts directory (useful in CI). |
-| `--project` | `-p` | `.` | Project root. |
-| `--verbose` | `-v` |   | Progress bar + per-stage timings. |
-| `--help` | `-h` |   | Show help. |
-
-### `togra tokens` flags
-
-| Flag / Arg | Default | Description |
-|------------|---------|-------------|
-| `[PATH]` | `.` | File or directory to scan. |
-| `--graph` / `-g` |   | Count tokens in `togra-output/graph.json` instead of source. |
-| `--lang` / `-l` |   | Language filter, comma-separated. |
-| `--project` / `-p` | `.` | Project root (controls `.tograignore` lookup). |
-| `--output-dir` / `-d` | `togra-output/` | Used together with `--graph`. |
-| `--chars-per-token` | `3.5` | Heuristic ratio — lower means more tokens per char. |
-| `--verbose` / `-v` |   | Per-file breakdown table. |
-| `--help` / `-h` |   | Show help. |
-
-Token counting is fully offline (no LLM clients, no network). It uses a
-length-based heuristic — `ceil(len(text) / 3.5)` by default — which
-approximates the Claude tokeniser within roughly 10 % on mixed code +
-prose. If you have a better estimate for your corpus, override
-`--chars-per-token`.
-
-### `togra clean`
-
-| Flag | Description |
-|------|-------------|
-| `--all` | Remove the entire `togra-output/` directory (not just the cache). |
+---
 
 ## Quick start
 
+Сценарий: вы один раз клонируете `togra` к себе на машину, и потом
+применяете её в любом из ваших проектов — каждый раз ставя в venv этого
+проекта.
+
+### 1) Один раз: склонируйте togra куда удобно
+
 ```bash
-cd my-project
-togra init
-togra build               # incremental (default)
-togra info                # see what was built
-togra tokens              # how big is the source corpus?
-togra tokens --graph      # how big is the resulting graph?
+git clone <repo-url> ~/tools/togra      # путь — любой
 ```
 
-Re-run `togra build` after code changes — only the modified files are
-re-parsed.
+### 2) В каждом новом проекте: создайте venv и поставьте togra
 
-## Supported languages
+```bash
+cd ~/projects/my-cool-app
+python3.13 -m venv venv                    # требуется Python 3.13+
+source venv/bin/activate                   # Windows: venv\Scripts\activate
+pip install -e ~/tools/togra               # editable: правки togra сразу видны
+# либо: pip install ~/tools/togra          # обычная установка-копия
+```
 
-| Language | Mode |
-|----------|------|
-| Python | Full AST parsing (`tree-sitter-python`) — imports, classes, methods, calls. |
-| JavaScript / TypeScript / TSX | Full AST parsing. |
-| Vue (`*.vue`) | `<template>` → component tags; `<script>` / `<script setup>` parsed as JS or TS. |
-| CSS / SCSS / SASS / LESS | Simplified: selectors, `@media`, `@import`, `url(...)`. |
-| HTML | Simplified: tags, ids, classes, `<script src>` / `<link href>`. |
-| JSON | Simplified: structural `keys_tree`. |
-| Anything else | Fallback node with `_meta.path` + empty `description` — no classes/functions/imports. |
+> **Подсказка.** Если нужен один общий `togra` на все проекты —
+> используйте `pipx install ~/tools/togra`: команда `togra` станет
+> доступна глобально, без активации venv в каждом проекте.
 
-## Output layout
+### 3) Инициализация и первый билд
 
-After `togra init` your project gains:
+```bash
+togra init --claude     # создаст togra-output/, .tograignore, AGENT_GUIDE.md
+                        # и .claude/togra.md (флаг --claude — опционален)
+togra build             # построит togra-output/graph.json
+togra info              # покажет статистику последнего билда
+```
+
+Готово. У вас в проекте появилось:
 
 ```
-my-project/
-├── .tograignore          # gitignore-style rules
+my-cool-app/
+├── .tograignore             # gitignore-style правила для togra
+├── .claude/togra.md         # (только при --claude) инструкция для Claude Code
 └── togra-output/
-    ├── graph.json        # main artefact — all `description` fields are ""
-    ├── manifest.json     # version, last-build timestamp, statistics
-    └── cache/
-        ├── index.json    # {rel_path: {hash, lang, fragment}}
-        └── fragments/    # per-file JSON, addressed by content SHA256
+    ├── graph.json           # сам граф — все description: ""
+    ├── AGENT_GUIDE.md       # инструкция для ИИ-агента: как заполнять описания
+    ├── manifest.json        # метаданные сборки
+    └── cache/               # SHA256-кэш фрагментов (в .gitignore)
 ```
 
-Recommended `.gitignore`:
+### 4) После изменений в коде
+
+```bash
+togra build               # инкрементально, перепарсит только изменённое
+```
+
+### 5) Скормите граф ИИ-агенту
+
+Передайте агенту `togra-output/graph.json` **вместе с
+`togra-output/AGENT_GUIDE.md`** и попросите заполнить пустые
+`description`. Агент работает по структуре, без чтения исходников —
+расход токенов предсказуем.
+
+---
+
+## Команды и ключевые флаги
+
+### `togra init` — подготовка проекта
+
+| Флаг | Что делает |
+|------|------------|
+| `--project` / `-p` | Корень проекта (по умолчанию текущая директория). |
+| `--claude` | Дополнительно создаёт `.claude/togra.md` — инструкцию для Claude Code: «сначала читай graph.json, потом исходники; после изменений обновляй описания». |
+| `--help` / `-h` | Справка. |
+
+Создаёт `togra-output/`, копирует `.gitignore` → `.tograignore` (или
+пишет дефолт + warning), кладёт `togra-output/AGENT_GUIDE.md`.
+
+### `togra build` — построить/обновить граф
+
+| Флаг | Алиас | Что делает |
+|------|-------|------------|
+| *(по умолчанию)* | `--update` / `-u` | Инкрементально: перепарсит только файлы с изменённым SHA256. |
+| `--full` | `-f` | Полный пересчёт, кэш игнорируется. |
+| `--newonly` | `-n` | Только новые файлы; изменённые оставит как есть. |
+| `--lang` | `-l` | Фильтр по языкам: `--lang python,typescript`. |
+| `--output` | `-o` | Кастомный путь к `graph.json`. |
+| `--output-dir` | `-d` | Кастомная папка артефактов (полезно в CI). |
+| `--verbose` | `-v` | Прогрессбар + тайминги. |
+| `--help` | `-h` | Справка. |
+
+### `togra info` — статистика
+
+Показывает версию togra, время последней сборки, число файлов,
+изменённых/чистых/удалённых, разбивку по языкам.
+
+### `togra tokens [PATH]` — оценка токенов
+
+Быстрая прикидка сколько токенов в исходниках или в графе. Оффлайн-эвристика
+(~3.5 символа на токен), приближение к Claude-токенайзеру.
+
+| Флаг / Аргумент | Что делает |
+|-----------------|------------|
+| `[PATH]` | Файл или папка (по умолчанию `.`). |
+| `--graph` / `-g` | Считает токены в `togra-output/graph.json`, а не в исходниках. |
+| `--lang` / `-l` | Фильтр по языкам. |
+| `--verbose` / `-v` | Таблица по файлам (отсортирована по убыванию). |
+| `--chars-per-token` | Перекалибровать соотношение (по умолчанию 3.5). |
+
+Примеры:
+
+```bash
+togra tokens                     # сколько в исходниках
+togra tokens --graph             # сколько в графе
+togra tokens . --lang python -v  # только Python, по файлам
+```
+
+### `togra clean` — почистить кэш
+
+| Флаг | Что делает |
+|------|------------|
+| `--all` | Удаляет всю папку `togra-output/`, а не только кэш. |
+
+---
+
+## Как работать с ИИ-агентом
+
+Канонический рабочий поток:
+
+1. **Вы:** `togra init --claude && togra build`.
+2. **Агент** читает `togra-output/AGENT_GUIDE.md` (правила: какие поля
+   трогать, целевые длины, стиль) → читает `togra-output/graph.json` →
+   заполняет пустые `description`. Сырой код агенту, как правило, не
+   нужен — структура уже есть.
+3. **Вы поправили код:** `togra build` → изменённые файлы перепарсились,
+   их `description` сброшены в `""`. Прогоните агента ещё раз — он
+   обновит только затронутые узлы.
+
+Файлы-инструкции (создаются автоматически):
+
+- [`togra-output/AGENT_GUIDE.md`](src/togra/templates/AGENT_GUIDE.md) —
+  контракт описаний: формат графа, жёсткие правила, чек-лист, примеры
+  хороших/плохих описаний.
+- [`.claude/togra.md`](src/togra/templates/claude_togra.md) — *(только
+  при `togra init --claude`)* инструкция для Claude Code: «сначала
+  graph.json, исходники — потом, после изменений — `togra build` и
+  обновление описаний».
+
+---
+
+## Поддерживаемые языки
+
+| Язык | Что извлекается |
+|------|-----------------|
+| Python | Импорты, классы, методы, функции, вызовы, декораторы, аннотации. |
+| JavaScript / TypeScript / TSX | То же — на уровне лексики (без вывода типов). |
+| Vue (`*.vue`) | Компоненты из `<template>`, `<script setup>` — как JS/TS. |
+| CSS / SCSS / SASS / LESS | Селекторы, `@media`, `@import`, `url(...)`. |
+| HTML | Теги, id, class, `<script src>`, `<link href>`. |
+| JSON | Структурный `keys_tree`. |
+| Прочее | Fallback-узел: `_meta.path` + пустой `description`. |
+
+---
+
+## Что коммитить, а что игнорировать
+
+Рекомендуемые правила в проектном `.gitignore`:
 
 ```gitignore
-# Cache is per-machine — do not commit
+# Кэш привязан к машине — не коммитим
 togra-output/cache/
-# Commit the graph for team sync (optional)
+
+# Граф полезно коммитить, чтобы команда работала с одной картой:
 # !togra-output/graph.json
 # !togra-output/manifest.json
+# !togra-output/AGENT_GUIDE.md
 ```
 
-## Workflow with an AI agent
+---
 
-1. `togra build` — generates `graph.json` with structured metadata and empty
-   `description` fields. **0 tokens.**
-2. Feed `graph.json` to your AI agent and ask it to fill the empty
-   `description` fields using the available types, parameters, imports and
-   call sites. Token cost stays predictable because the agent never sees
-   raw source code.
-3. After code changes run `togra build` again — only modified files are
-   re-parsed. The agent only refreshes affected descriptions.
+## FAQ
 
-## Development
+**Нужен ли мне OpenAI/Anthropic API-ключ?** Нет. `togra` не делает ни
+одного сетевого запроса. Заполнение `description` — отдельный шаг,
+который вы запускаете в своём ИИ-агенте сами.
+
+**А если моего языка нет в списке?** Файл попадёт в граф как
+fallback-узел (с путём и пустым `description`) — структуру каталогов вы
+всё равно увидите. Просто без классов/функций.
+
+**Безопасно ли коммитить `graph.json`?** Да. Он не содержит исходного
+кода — только структуру и имена. Кэш (`togra-output/cache/`) лучше не
+коммитить: он привязан к содержимому файлов конкретного клона.
+
+**Поломал кэш / странные результаты?** `togra clean` сбрасывает кэш;
+`togra clean --all` сносит всю папку `togra-output/`. Потом —
+`togra init` + `togra build --full`.
+
+**Хочу поменять расположение артефактов в CI.** `togra build --output-dir
+./artifacts/togra/` — все файлы лягут туда.
+
+---
+
+## Разработка самого togra
 
 ```bash
-git clone <this repo>
-cd token_graph_for_claudecode
+git clone <repo-url> && cd token_graph_for_claudecode
 python3.13 -m venv venv
 ./venv/bin/pip install -e ".[dev]"
 ./venv/bin/pytest -q
 ```
 
+Архитектура и требования описаны в
+[`.claude/tech-task.md`](.claude/tech-task.md).
+
+---
+
 ## License
 
-MIT. No telemetry, no hidden API calls.
+MIT. Никакой телеметрии, никаких скрытых API-вызовов.
